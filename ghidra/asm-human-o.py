@@ -2,13 +2,13 @@ import os
 import json
 import subprocess
 
-# ================= 配置区 =================
-JSON_FILE = "/home/lhw/codetran/test/humaneval_decompile.json"  # 🎯 你的 JSON 文件路径
+# ================= Configuration =================
+JSON_FILE = "/home/lhw/codetran/test/humaneval_decompile.json"  # Path to the input JSON file.
 
-# 🎯 交叉编译工具
+# Cross-compilation toolchain.
 CC = "aarch64-linux-gnu-gcc"
 
-# 🎯 根输出目录（专门存放编译出的 .c 和 .o 文件）
+# Root output directory dedicated to generated .c and .o files.
 base_output_dir = os.path.abspath("compiled-o-files")
 # ==========================================
 
@@ -30,7 +30,7 @@ def compile_json_to_o_files():
         if not c_func:
             continue
 
-        # 根据不同的优化级别动态创建子文件夹
+        # Create a subdirectory for each optimization level.
         output_dir = os.path.join(base_output_dir, opt_type)
         os.makedirs(output_dir, exist_ok=True)
 
@@ -38,18 +38,18 @@ def compile_json_to_o_files():
         output_c_filepath = os.path.join(output_dir, f"{base_name}.c")
         output_o_filepath = os.path.join(output_dir, f"{base_name}.o")
         
-        # 如果 .o 文件已存在可以跳过
+        # Skip the task if its .o file already exists.
         if os.path.exists(output_o_filepath):
             print(f"[{base_name}] ⏭️ .o 文件已经存在，跳过...")
             continue
 
         print(f"[{base_name}] 正在编译 (优化级别: {opt_type})...")
 
-        # 将 JSON 中的原生代码提取并写入 .c 文件供排查
+        # Extract the original code from JSON and save it as a .c file for inspection.
         with open(output_c_filepath, "w", encoding='utf-8') as f_out:
             f_out.write(c_func)
 
-        # 通过 GCC 动态编译为 .o 文件 (包含 -g 调试信息)
+        # Compile dynamically with GCC into a .o file, including -g debug information.
         opt_flag = f"-{opt_type}" if opt_type.startswith("O") else "-O0"
         compile_cmd = [CC, "-c", output_c_filepath, "-o", output_o_filepath, opt_flag, "-w", "-g"]
         

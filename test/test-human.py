@@ -11,22 +11,22 @@ import time
 from pathlib import Path
 
 
-# ================= 默认配置区 =================
+# ================= Default configuration =================
 
 DEFAULT_JSON_FILE = "/home/lhw/codetran/test/step1_results.json"
 
-# 图中这种目录，例如：
+# Directory containing recovered C files, for example:
 # /home/lhw/codetran/recon/reconstruct_xxx/O1
 DEFAULT_C_DIR = "/home/lhw/inspect/inspect-human/O3"
 
-# 只测试某个优化级别；如果不想过滤，传 --target-type all
+# Test one optimization level; pass --target-type all to disable filtering.
 DEFAULT_TARGET_TYPE = "O3"
 
-# 本地原生环境
+# Native host environment.
 DEFAULT_CC = "gcc"
 DEFAULT_RUNNER_CMD = ""
 
-# ARM 交叉运行示例：
+# ARM cross-execution example:
 # DEFAULT_CC = "aarch64-linux-gnu-gcc"
 # DEFAULT_RUNNER_CMD = "qemu-aarch64 -L /usr/aarch64-linux-gnu"
 
@@ -160,20 +160,21 @@ def write_metrics_reports(output_dir: Path, config, metrics, task_results, failu
 
 def strip_assert_include(c_test: str) -> str:
     """
-    去掉测试代码里的 #include <assert.h>，避免覆盖自定义 assert。
+    Remove #include <assert.h> from test code so it does not override the
+    custom assert implementation.
     """
     return re.sub(r'#include\s*<assert\.h>', '', c_test)
 
 
 def strip_main_if_needed(c_code: str, strip_main: bool) -> str:
     """
-    如果 fixed.c 里包含 main，而 JSON 的 c_test 里也包含 main，
-    就可能重复定义 main。
+    A main function in both fixed.c and the JSON c_test causes a duplicate
+    definition.
 
-    这里默认不强行删除 main，因为用正则安全删除 C main 很难。
-    如果你的 task_x_fixed.c 里确实包含 main，建议：
-    1. 不拼接 JSON 测试，使用 --no-json-test；
-    2. 或者保证 fixed.c 只包含函数实现。
+    main is preserved by default because safely removing a C function with a
+    regular expression is difficult. If task_x_fixed.c contains main, either:
+    1. Disable JSON test concatenation with --no-json-test.
+    2. Ensure fixed.c contains function implementations only.
     """
     if not strip_main:
         return c_code
@@ -186,7 +187,7 @@ def strip_main_if_needed(c_code: str, strip_main: bool) -> str:
     if not m:
         return c_code
 
-    # 简单括号匹配删除 main 函数体
+    # Remove the main function body with basic brace matching.
     start = m.start()
     brace_pos = c_code.find("{", m.end() - 1)
     if brace_pos == -1:
@@ -211,13 +212,13 @@ def strip_main_if_needed(c_code: str, strip_main: bool) -> str:
 
 def extract_task_id_from_filename(path: Path):
     """
-    支持以下文件名：
+    Supported file names:
     1. task_0_fixed.c
     2. task_0_O0_fixed.c
     3. task_15_O1_fixed.c
     4. task_20_O0-l3_fixed.c
 
-    返回 task_id。
+    Return the task ID.
     """
     m = re.match(r"task_(\d+)(?:_[A-Za-z0-9\-]+)?_fixed\.c$", path.name)
     if not m:
@@ -240,7 +241,7 @@ def load_json_items(json_path: Path):
 
 def build_test_map_from_json(json_items, target_type):
     """
-    建立 task_id -> JSON item 的映射，方便从 C 文件名 task_x_fixed.c 找对应测试。
+    Build a task_id-to-JSON-item map so task_x_fixed.c can be matched to its test.
     """
     test_map = {}
 
@@ -258,7 +259,7 @@ def build_test_map_from_json(json_items, target_type):
 
 def collect_tasks_from_json(json_items, target_type):
     """
-    原始模式：从 JSON 的 nova_output 读取 C 实现。
+    Original mode: read C implementations from the JSON nova_output field.
     """
     tasks = []
 
@@ -286,9 +287,9 @@ def collect_tasks_from_json(json_items, target_type):
 
 def extract_opt_type_from_filename(path: Path):
     """
-    从文件名中提取优化等级。
+    Extract the optimization level from a file name.
 
-    支持：
+    Supported forms:
     task_0_O0_fixed.c      -> O0
     task_1_O1_fixed.c      -> O1
     task_2_O0-l3_fixed.c   -> O0-l3
@@ -301,16 +302,16 @@ def extract_opt_type_from_filename(path: Path):
 
 def collect_tasks_from_c_dir(c_dir: Path, json_items, target_type, use_json_test=True):
     """
-    新模式：直接读取 task_x_fixed.c 或 task_x_O0_fixed.c。
+    Directory mode: read task_x_fixed.c or task_x_O0_fixed.c directly.
 
-    支持文件名：
+    Supported file names:
     - task_0_fixed.c
     - task_0_O0_fixed.c
     - task_1_O1_fixed.c
     - task_2_O0-l3_fixed.c
 
-    如果 use_json_test=True，则根据 task_id 到 JSON 中找对应 c_test。
-    如果文件名里带 O0/O1/O2/O3，则优先使用文件名中的优化等级。
+    When use_json_test=True, match c_test from JSON by task_id.
+    An optimization level in the file name takes precedence over the JSON value.
     """
     if not c_dir.exists():
         raise FileNotFoundError(f"找不到 C 文件目录: {c_dir}")
@@ -339,7 +340,7 @@ def collect_tasks_from_c_dir(c_dir: Path, json_items, target_type, use_json_test
 
         file_opt_type = extract_opt_type_from_filename(file_path)
 
-        # 如果文件名里有 O0/O1/O2/O3，并且指定了 target_type，则按文件名过滤
+        # If the file name has an optimization level, use it for target_type filtering.
         if target_type is not None and file_opt_type is not None:
             if file_opt_type != target_type:
                 print(
@@ -377,7 +378,7 @@ def collect_tasks_from_c_dir(c_dir: Path, json_items, target_type, use_json_test
 
 def build_full_c_code(c_code: str, c_test: str, use_json_test: bool, strip_main: bool):
     """
-    生成最终用于编译测试的 C 文件。
+    Build the final C source used for compilation and testing.
     """
     c_code = strip_main_if_needed(c_code, strip_main=strip_main)
 
@@ -385,7 +386,7 @@ def build_full_c_code(c_code: str, c_test: str, use_json_test: bool, strip_main:
         c_test_modified = strip_assert_include(c_test)
         return (
             c_code
-            + "\n\n// --- 以下为注入的测试代码 ---\n"
+            + "\n\n// --- Injected test code ---\n"
             + CUSTOM_ASSERT_MACRO
             + "\n"
             + c_test_modified
@@ -424,7 +425,7 @@ def run_one_task_legacy(
     print(f"========== 测试任务 (Task ID: {task_id}, Type: {opt_type}) ==========")
     print(f"  📄 来源: {task['source_name']}")
 
-    # 1. 编译阶段
+    # 1. Compilation stage.
     compile_cmd = [cc, str(src_path), "-o", str(exe_path), "-lm", "-w"]
 
     try:
@@ -486,7 +487,7 @@ def run_one_task_legacy(
             }
         }
 
-    # 2. 运行阶段
+    # 2. Execution stage.
     run_cmd = runner_cmd + [str(exe_path)]
 
     try:

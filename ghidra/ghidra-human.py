@@ -2,20 +2,20 @@ import os
 import tempfile
 import subprocess
 
-timeout_duration = 60 # 建议适当调大，Ghidra 启动和分析较慢
+timeout_duration = 60 # Increase if needed because Ghidra startup and analysis can be slow.
 
-# --- 配置路径与参数 ---
+# --- Paths and options ---
 ghidra_path = os.path.abspath("/home/lhw/ghidra_12.0.3_PUBLIC/support/analyzeHeadless")
 postscript = os.path.abspath("./decompile.py") 
 project_name = "tmp_ghidra_proj"
 
-# 🎯 【修改点 1】将此处修改为包含所有优化级别文件夹的父目录
+# Set this to the parent directory that contains every optimization-level folder.
 base_root_folder = os.path.abspath("/home/lhw/codetran/ghidra/compiled-elf-files")
 
-# 🎯 【新增配置】指定要单独扫描的优化级别。设为 None 则扫描全部。
-target_opt_level = "O3"  # 你可以将其修改为 "O1", "O2", "O3" 等；如果想全部扫描，请改为 None
+# Select one optimization level to scan, or use None to scan all levels.
+target_opt_level = "O3"  # Change to O1, O2, O3, and so on, or use None to scan everything.
 
-# 🎯 基础输出目录
+# Base output directory.
 base_output_dir = os.path.abspath("dec-human")
 os.makedirs(base_output_dir, exist_ok=True)
 
@@ -23,29 +23,29 @@ print(f"开始扫描基础目录: {base_root_folder}")
 if target_opt_level:
     print(f"🎯 过滤模式：仅处理优化级别 [{target_opt_level}] 的文件")
 
-# 使用 os.walk 遍历所有子目录
+# Traverse every subdirectory with os.walk.
 for dirpath, dirnames, filenames in os.walk(base_root_folder):
     for filename in filenames:
         if filename.endswith(".elf"):
             target_o_file = os.path.join(dirpath, filename)
             base_name = os.path.splitext(filename)[0]
             
-            # 🎯 【修改点 2】动态获取优化级别并创建对应输出目录
-            # 获取当前文件所在目录相对于基础根目录的相对路径 (例如 'O0', 'O2/subfolder')
+            # Determine the optimization level and create its output directory dynamically.
+            # Get the file's parent path relative to the base root, for example 'O0' or 'O2/subfolder'.
             rel_path = os.path.relpath(dirpath, base_root_folder)
             
-            # 提取第一级目录名作为优化级别标识 (例如 'O0')
+            # Use the first path component as the optimization-level label, for example O0.
             opt_level = rel_path.split(os.sep)[0]
             
-            # 如果 .o 文件直接存放在 base_root_folder 根目录下，rel_path 会是 '.'
+            # rel_path is '.' when a .o file is stored directly in base_root_folder.
             if opt_level == '.':
                 opt_level = 'default_level'
                 
-            # 🎯 【新增逻辑】检查当前文件是否属于指定的优化级别
+            # Check whether the file belongs to the requested optimization level.
             if target_opt_level and opt_level != target_opt_level:
                 continue
                 
-            # 拼接并创建对应优化级别的输出文件夹 (例如 decompile-human/O0)
+            # Build and create the matching output directory, for example decompile-human/O0.
             current_output_dir = os.path.join(base_output_dir, opt_level)
             os.makedirs(current_output_dir, exist_ok=True)
             
@@ -55,7 +55,7 @@ for dirpath, dirnames, filenames in os.walk(base_root_folder):
             with tempfile.TemporaryDirectory() as temp_dir:
                 output_path = os.path.join(temp_dir, "decompiled_output.c")
                 
-                # 调用 Ghidra Headless 分析器
+                # Invoke the Ghidra headless analyzer.
                 command = [
                     ghidra_path,
                     temp_dir,
@@ -68,7 +68,7 @@ for dirpath, dirnames, filenames in os.walk(base_root_folder):
                 
                 print(f"[{opt_level}][{base_name}] 正在使用 Ghidra 进行反编译...")
                 try:
-                    # 🎯 【修改点 3】加入了 timeout 参数，防止卡死
+                    # Apply a timeout so the subprocess cannot hang indefinitely.
                     result = subprocess.run(command, text=True, capture_output=True, timeout=timeout_duration)
                 except subprocess.TimeoutExpired:
                     print(f"[{opt_level}][{base_name}] ❌ Ghidra 分析超时 (超过 {timeout_duration} 秒)！跳过此文件。")
@@ -77,12 +77,12 @@ for dirpath, dirnames, filenames in os.walk(base_root_folder):
                     print(f"[{opt_level}][{base_name}] ❌ 运行 Ghidra 时发生错误: {e}")
                     continue
                 
-                # 检查文件是否生成
+                # Verify that the output file was generated.
                 if not os.path.exists(output_path):
                     print(f"[{opt_level}][{base_name}] ❌ Ghidra 未能成功生成反编译文件！跳过此文件。")
                     continue
                 
-                # 解析并提取所有函数的反编译结果
+                # Parse and extract the decompiled output for every function.
                 try:
                     with open(output_path, 'r', encoding='utf-8') as f:
                         c_decompile = f.read()
@@ -90,7 +90,7 @@ for dirpath, dirnames, filenames in os.walk(base_root_folder):
                     functions_dict = {}
                     current_func = None
                     
-                    # 逐行解析，利用 '// Function:' 分割识别出所有的函数
+                    # Parse line by line and split functions at '// Function:' markers.
                     for line in c_decompile.split('\n'):
                         if '// Function:' in line:
                             parts = line.split('// Function:')
@@ -107,13 +107,13 @@ for dirpath, dirnames, filenames in os.walk(base_root_folder):
                         
                     print(f"[{opt_level}][{base_name}] 🎯 发现 {len(functions_dict)} 个函数，正在提取并保存...")
                     
-                    # 🎯 【修改点 4】将文件保存到对应优化级别的文件夹内
+                    # Save the file in the matching optimization-level directory.
                     output_c_filepath = os.path.join(current_output_dir, f"{base_name}_ghidra.c")
                     
                     with open(output_c_filepath, 'w', encoding='utf-8') as f_out:
-                        # 遍历并写入每一个提取出的函数
+                        # Iterate over and write each extracted function.
                         for func_name, c_func_lines in functions_dict.items():
-                            # 移除前面的无关注释信息，定位到具体的函数体签名
+                            # Remove leading metadata comments and locate the function signature.
                             start_idx = 0
                             for idx_tmp in range(1, len(c_func_lines)):
                                 if func_name in c_func_lines[idx_tmp]:
@@ -121,11 +121,11 @@ for dirpath, dirnames, filenames in os.walk(base_root_folder):
                                     break
                             c_func_lines = c_func_lines[start_idx:]
                             
-                            # 生成纯净的反编译代码字符串
+                            # Build a clean decompiled-code string.
                             pure_decompiled_code = '\n'.join(c_func_lines).strip()
 
                             if pure_decompiled_code:
-                                # 写入函数并在函数之间添加分隔符和空行
+                                # Write the function with separators and blank lines between functions.
                                 f_out.write(f"// --- Function: {func_name} ---\n")
                                 f_out.write(pure_decompiled_code)
                                 f_out.write("\n\n")

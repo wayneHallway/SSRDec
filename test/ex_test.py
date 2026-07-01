@@ -6,7 +6,7 @@ import shutil
 import json
 import tempfile
 
-# ================= 配置区域 =================
+# ================= Configuration =================
 COMPILER = "gcc"
 OPT_LEVEL = "-O0"
 OUTPUT_BASE_DIR = "./build_outputs"
@@ -21,7 +21,7 @@ CLEAN_TEMP_SUITE_DIR = True
 
 
 def run_cmd(cmd, cwd, timeout=None):
-    """执行 shell 命令，返回 success, output"""
+    """Run a shell command and return (success, output)."""
     try:
         res = subprocess.run(
             cmd,
@@ -42,9 +42,9 @@ def run_cmd(cmd, cwd, timeout=None):
 
 def collect_benchmarks(source_dir):
     """
-    从 SOURCE_DIR 中递归收集 benchmark 源文件。
+    Recursively collect benchmark source files from SOURCE_DIR.
 
-    优先级：
+    Priority:
     1. <bench>.c
     2. <bench>_fixed.c
     """
@@ -68,7 +68,7 @@ def collect_benchmarks(source_dir):
 
 
 def choose_source_file(bench, file_map):
-    """优先选择普通 .c；没有普通 .c 时选择 _fixed.c"""
+    """Prefer a regular .c file, falling back to _fixed.c."""
     paths = file_map.get(bench, {})
     primary_path = paths.get("primary")
     fallback_path = paths.get("fallback")
@@ -81,7 +81,7 @@ def choose_source_file(bench, file_map):
 
 
 def is_executable_binary(path):
-    """判断是否是真正的 ELF 或 Mach-O 可执行文件"""
+    """Return whether a file is a genuine ELF or Mach-O executable."""
     if not (os.path.isfile(path) and os.access(path, os.X_OK)):
         return False
 
@@ -104,13 +104,14 @@ def is_executable_binary(path):
 
 def find_host_executable(bench_dir, bench_name, build_start_time=None):
     """
-    查找 host 可执行文件。
+    Find the host executable.
 
-    重点：
-    1. 优先找 <bench>.host；
-    2. 不把 <bench>.out 当可执行文件；
-    3. 只接受 ELF/Mach-O；
-    4. 如果传入 build_start_time，只接受本次 build 后生成/更新的文件。
+    Rules:
+    1. Prefer <bench>.host.
+    2. Do not treat <bench>.out as an executable.
+    3. Accept only ELF or Mach-O files.
+    4. If build_start_time is provided, accept only files created or updated
+       by the current build.
     """
     guesses = [
         bench_name + ".host",
@@ -159,8 +160,8 @@ def find_host_executable(bench_dir, bench_name, build_start_time=None):
 
 def remove_old_host_outputs(bench_dir, bench_name):
     """
-    删除当前 benchmark 目录里可能残留的旧 host 可执行产物。
-    不删除 .out/.hash/.c/.h/Makefile。
+    Remove stale host executable artifacts from the benchmark directory.
+    Preserve .out, .hash, .c, .h, and Makefile files.
     """
     names = [
         bench_name + ".host",
@@ -212,7 +213,7 @@ def print_log_tail(title, log, n=50):
 
 
 def get_build_and_test_cmds():
-    """统一生成构建和测试命令。"""
+    """Build the compilation and test commands consistently."""
     build_cmd = (
         f'make TARGET={TARGET_ARCH} '
         f'CC="{COMPILER}" '
@@ -230,20 +231,20 @@ def get_build_and_test_cmds():
 
 def run_comprehensive_evaluation(code_str, task_id, variant_name="Root"):
     """
-    外部 InspectCoder/BFS 脚本需要调用的测试函数。
+    Test entry point used by external InspectCoder/BFS scripts.
 
-    必须返回四个值：
+    Return exactly four values:
         is_compiled: bool
         is_run_success: bool
         report_log: str
         elf_path: str | None
 
-    这个函数会：
-    1. 把 code_str 写入 BENCH_DIR/task_id/task_id.c；
-    2. 执行 make clean build；
-    3. 查找 host 可执行文件；
-    4. 执行 make test；
-    5. 返回编译/执行结果和完整日志。
+    This function:
+    1. Writes code_str to BENCH_DIR/task_id/task_id.c.
+    2. Runs make clean build.
+    3. Locates the host executable.
+    4. Runs make test.
+    5. Returns the compilation/execution results and complete log.
     """
     bench_build_dir = os.path.join(BENCH_DIR, task_id)
     if not os.path.isdir(bench_build_dir):
@@ -309,8 +310,8 @@ def run_comprehensive_evaluation(code_str, task_id, variant_name="Root"):
 
 def main():
     """
-    保留原来的批量测试能力。
-    注意：被 InspectCoder import 时不会执行 main()。
+    Preserve the original batch-testing workflow.
+    main() is not executed when InspectCoder imports this module.
     """
     global BENCH_DIR
 
@@ -323,7 +324,7 @@ def main():
     original_bench_dir = BENCH_DIR
     tmp_root, suite_dir = prepare_suite_dir()
 
-    # 如果单独运行这个脚本且开启了临时 suite，则后续单测函数也使用临时 suite。
+    # When run directly with a temporary suite, subsequent tests use that suite as well.
     BENCH_DIR = suite_dir
 
     print(f"🎯 开始处理，共 {len(benchmarks)} 个项目")

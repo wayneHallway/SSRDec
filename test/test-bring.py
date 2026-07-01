@@ -3,13 +3,16 @@
 """
 Disk-safe Bringup-Bench build/test runner.
 
-主要改造点：
-1. 每次运行使用独立临时 suite，但会自动清理旧临时目录。
-2. 所有 make 命令放入独立进程组，超时时杀掉整个进程组，避免 FOO / .host 被后台进程占用。
-3. 日志落盘前做大小限制，避免 test 输出无限增长占满磁盘。
-4. 输出目录只保留最近 N 次运行。
-5. 每个 benchmark 结束后尽量 make clean，并删除 host 可执行残留。
-6. 程序异常退出、Ctrl-C、正常退出时都会尝试清理临时目录和子进程。
+Key safeguards:
+1. Each run uses an isolated temporary suite and automatically removes old ones.
+2. Every make command runs in its own process group; timeouts terminate the
+   entire group so background processes cannot retain FOO or .host files.
+3. Logs are size-limited before being written to prevent unbounded test output
+   from filling the disk.
+4. Only the most recent N output directories are retained.
+5. Each benchmark attempts make clean and removes residual host executables.
+6. Temporary directories and child processes are cleaned on errors, Ctrl-C,
+   and normal exit.
 """
 
 import atexit
@@ -26,7 +29,7 @@ import tempfile
 import time
 from pathlib import Path
 
-# ================= 配置区域 =================
+# ================= Configuration =================
 COMPILER = "gcc"
 OPT_LEVEL = "-O0"
 
@@ -40,43 +43,44 @@ BUILD_TIMEOUT = 120
 TEST_TIMEOUT = 120
 CLEAN_TIMEOUT = 30
 
-# 是否复制整个 bringup-bench 到临时目录。
-# True: 不污染原始 BENCH_DIR，推荐。
-# False: 直接在原始 BENCH_DIR 中覆盖源码并构建，不推荐。
+# Whether to copy all of bringup-bench into a temporary directory.
+# True: preserve the original BENCH_DIR; recommended.
+# False: overwrite and build sources directly in the original BENCH_DIR; not recommended.
 USE_TEMP_SUITE_DIR = True
 
-# 是否删除本次运行的临时目录。
-# 强烈建议 True；否则多次运行会很快占满磁盘。
+# Whether to remove the current run's temporary directory.
+# True is strongly recommended; repeated runs can otherwise fill the disk quickly.
 CLEAN_TEMP_SUITE_DIR = True
 
-# 临时 suite 统一放在这里，方便集中清理。
-# 不建议放到项目目录中，避免被误认为实验输出。
+# Keep all temporary suites here for centralized cleanup.
+# Avoid the project directory so they are not mistaken for experiment outputs.
 TEMP_PARENT_DIR = "/tmp/bringup_bench_suites"
 
-# 启动时清理 TEMP_PARENT_DIR 下较旧的临时 suite，只保留最近 N 个。
+# At startup, remove old suites under TEMP_PARENT_DIR and retain the newest N.
 KEEP_LAST_TEMP_RUNS = 1
 
-# 输出目录只保留最近 N 次运行。
+# Retain only the newest N output runs.
 KEEP_LAST_OUTPUT_RUNS = 5
 
-# 每个 build.log / test.log 最大保存字符数。
-# 原始日志过大时保存 head + tail，中间截断。
+# Maximum number of characters stored in each build.log or test.log.
+# Oversized logs retain their head and tail, with the middle truncated.
 MAX_LOG_CHARS = 300_000
 MAX_JSON_LOG_CHARS = 60_000
 
-# 是否把编译出的 host 可执行复制到输出目录。
-# 如果你只关心通过率，建议 False，可显著减少磁盘占用。
+# Whether to copy compiled host executables into the output directory.
+# Use False when only pass rates matter to reduce disk usage significantly.
 COPY_HOST_EXECUTABLE = False
 
-# 每个 benchmark 测试结束后是否执行 make clean。
-# True 会降低磁盘占用；如果你需要保留中间产物调试，可改 False。
+# Whether to run make clean after each benchmark test.
+# True reduces disk usage; use False to retain intermediate artifacts for debugging.
 CLEAN_AFTER_EACH_BENCH = True
 
-# 磁盘剩余空间低于该值时提前停止，避免把 / 写满。
+# Stop early below this free-space threshold to avoid filling the root filesystem.
 MIN_FREE_SPACE_GB = 5.0
 
-# 启动时是否尝试清理当前用户残留的 bringup-bench deleted 文件占用进程。
-# 谨慎：会杀掉命令行中包含 BENCH_DIR 或 TEMP_PARENT_DIR 的相关残留进程。
+# Whether startup should terminate stale current-user processes holding deleted
+# bringup-bench files. Use caution: matching processes whose command line
+# contains BENCH_DIR or TEMP_PARENT_DIR will be terminated.
 KILL_STALE_DELETED_FILE_PROCESSES_AT_START = False
 # ============================================
 
@@ -93,7 +97,7 @@ def ensure_dir(path):
 
 
 def disk_free_gb(path):
-    """返回 path 所在文件系统剩余 GB。"""
+    """Return free space, in GiB, on the filesystem containing path."""
     target = path if os.path.exists(path) else os.path.dirname(os.path.abspath(path)) or "/"
     usage = shutil.disk_usage(target)
     return usage.free / (1024 ** 3)
@@ -109,7 +113,7 @@ def check_free_space_or_raise(path, min_gb=MIN_FREE_SPACE_GB):
 
 
 def compact_text(text, max_chars):
-    """限制日志大小，保留开头和结尾。"""
+    """Limit log size while retaining its beginning and end."""
     if text is None:
         return ""
     if len(text) <= max_chars:
@@ -125,12 +129,12 @@ def compact_text(text, max_chars):
 
 def run_cmd(cmd, cwd, timeout=None):
     """
-    执行 shell 命令，返回 success, output。
+    Run a shell command and return (success, output).
 
-    关键点：
-    - 使用 start_new_session=True 创建独立进程组；
-    - timeout 时 killpg，杀掉 make 及其所有子进程；
-    - communicate() 后确保 stdout pipe 关闭，避免 fd 残留。
+    Key behavior:
+    - start_new_session=True creates an isolated process group.
+    - On timeout, killpg terminates make and all of its child processes.
+    - communicate() ensures the stdout pipe closes without leaking descriptors.
     """
     proc = None
     pgid = None
@@ -169,7 +173,7 @@ def run_cmd(cmd, cwd, timeout=None):
 
 
 def kill_process_group(pgid):
-    """先 SIGTERM 后 SIGKILL，尽量完整回收子进程。"""
+    """Send SIGTERM, then SIGKILL, to reclaim child processes reliably."""
     if pgid is None:
         return
     for sig, wait_s in ((signal.SIGTERM, 1.5), (signal.SIGKILL, 0.2)):
@@ -217,7 +221,7 @@ signal.signal(signal.SIGTERM, handle_exit_signal)
 
 
 def cleanup_old_dirs(parent_dir, keep_last_n):
-    """清理 parent_dir 下旧的直接子目录，只保留最近 keep_last_n 个。"""
+    """Remove old direct children of parent_dir, retaining the newest keep_last_n."""
     if keep_last_n is None or keep_last_n < 0:
         return
     if not os.path.isdir(parent_dir):
@@ -244,8 +248,8 @@ def cleanup_old_outputs(output_base_dir, opt_dir_name, keep_last_n=KEEP_LAST_OUT
 
 def cleanup_stale_deleted_file_processes():
     """
-    可选清理：杀掉当前用户下仍占用 deleted 文件且路径相关的残留进程。
-    默认关闭，避免误杀正在运行的其它实验。
+    Optionally terminate stale current-user processes that retain related
+    deleted files. Disabled by default to avoid disrupting other experiments.
     """
     if not KILL_STALE_DELETED_FILE_PROCESSES_AT_START:
         return
@@ -265,7 +269,7 @@ def cleanup_stale_deleted_file_processes():
                 continue
             pid = parts[1]
             user = parts[2]
-            # lsof 的 USER 列可能是用户名，不一定是 uid；这里不强制匹配。
+        # lsof's USER column may contain a name rather than a UID, so do not require a match.
             if pid.isdigit() and int(pid) != os.getpid():
                 pids.add(int(pid))
         for pid in sorted(pids):
@@ -284,9 +288,9 @@ def cleanup_stale_deleted_file_processes():
 
 def collect_benchmarks(source_dir):
     """
-    从 SOURCE_DIR 中递归收集 benchmark 源文件。
+    Recursively collect benchmark source files from SOURCE_DIR.
 
-    优先级：
+    Priority:
     1. <bench>.c
     2. <bench>_fixed.c
     """
@@ -310,7 +314,7 @@ def collect_benchmarks(source_dir):
 
 
 def choose_source_file(bench, file_map):
-    """优先选择普通 .c；没有普通 .c 时选择 _fixed.c。"""
+    """Prefer a regular .c file, falling back to _fixed.c."""
     paths = file_map.get(bench, {})
     primary_path = paths.get("primary")
     fallback_path = paths.get("fallback")
@@ -323,7 +327,7 @@ def choose_source_file(bench, file_map):
 
 
 def is_executable_binary(path):
-    """判断是否是真正的 ELF 或 Mach-O 可执行文件。"""
+    """Return whether a file is a genuine ELF or Mach-O executable."""
     if not (os.path.isfile(path) and os.access(path, os.X_OK)):
         return False
 
@@ -346,7 +350,7 @@ def is_executable_binary(path):
 
 
 def find_host_executable(bench_dir, bench_name, build_start_time=None):
-    """查找本次 build 生成的 host 可执行文件。"""
+    """Find the host executable produced by the current build."""
     guesses = [
         bench_name + ".host",
         bench_name,
@@ -393,7 +397,7 @@ def find_host_executable(bench_dir, bench_name, build_start_time=None):
 
 
 def remove_old_host_outputs(bench_dir, bench_name):
-    """删除当前 benchmark 目录里可能残留的 host 可执行产物。"""
+    """Remove residual host executable artifacts from the benchmark directory."""
     names = [
         bench_name + ".host",
         bench_name,
@@ -416,12 +420,12 @@ def remove_old_host_outputs(bench_dir, bench_name):
 
 def copy_whole_suite_to_temp(run_id):
     """
-    复制整个 Bringup-Bench 工程到临时目录。
+    Copy the entire Bringup-Bench project into a temporary directory.
 
-    改造点：
-    - 所有临时 suite 都放到 TEMP_PARENT_DIR；
-    - 启动前清理旧 suite；
-    - 忽略明显无用的缓存目录。
+    Behavior:
+    - Store every temporary suite under TEMP_PARENT_DIR.
+    - Remove old suites before startup.
+    - Ignore known disposable cache directories.
     """
     ensure_dir(TEMP_PARENT_DIR)
     cleanup_old_dirs(TEMP_PARENT_DIR, KEEP_LAST_TEMP_RUNS)
@@ -449,7 +453,7 @@ def prepare_suite_dir(run_id):
 
 
 def write_text_file(path, content, max_chars=MAX_LOG_CHARS):
-    """写日志文件，并限制体积。"""
+    """Write a log file with size limits applied."""
     ensure_dir(os.path.dirname(path))
     content = compact_text(content or "", max_chars)
     with open(path, "w", encoding="utf-8", errors="ignore") as f:
@@ -545,7 +549,7 @@ def write_metrics_reports(output_dir, config, metrics, benchmark_results, errors
 
 
 def print_log_tail(title, log, n=50):
-    """打印日志最后 n 行。"""
+    """Print the final n lines of a log."""
     print(title)
     lines = (log or "").strip().split("\n")
     tail = lines[-n:] if lines else [""]
@@ -570,7 +574,7 @@ def make_translation_unit_compile_command(source_c_path, object_path):
 
 
 def clean_benchmark_dir(bench_build_dir, bench):
-    """尽量清理当前 benchmark 的构建产物。"""
+    """Best-effort cleanup of the current benchmark's build artifacts."""
     if not os.path.isdir(bench_build_dir):
         return
     clean_cmd = make_command("clean")
@@ -769,7 +773,7 @@ def main():
 
             remove_old_host_outputs(bench_build_dir, bench)
 
-            # ---------- Build 阶段 ----------
+            # ---------- Build stage ----------
             build_start_time = time.time()
             build_ok, build_log = run_cmd(
                 build_cmd,
@@ -841,7 +845,7 @@ def main():
             build_success_count += 1
             bench_result["full_build"] = True
 
-            # ---------- Test 阶段 ----------
+            # ---------- Test stage ----------
             test_start_time = time.time()
             test_ok, test_log = run_cmd(
                 test_cmd,
@@ -905,10 +909,10 @@ def main():
             benchmark_results.append(bench_result)
 
     finally:
-        # 正常汇总前也先确保没有子进程仍占用 deleted 文件。
+        # Before summarizing, ensure no child process still holds a deleted file.
         kill_all_active_process_groups()
 
-    # ---------- 汇总 ----------
+    # ---------- Summary ----------
     json_report_path = os.path.join(out_dir, "error_summary.json")
 
     build_rate_total = build_success_count / total_benchmarks if total_benchmarks else 0.0
