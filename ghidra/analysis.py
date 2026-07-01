@@ -4,7 +4,7 @@ import argparse
 try:
     from pycparser import c_parser, c_ast
 except ImportError:
-    print("错误: 请先安装 pycparser 库。命令: pip install pycparser")
+    print("Error: install pycparser first. Command: pip install pycparser")
     exit(1)
 
 class DecompilerTrapVisitor(c_ast.NodeVisitor):
@@ -17,13 +17,18 @@ class DecompilerTrapVisitor(c_ast.NodeVisitor):
 
     def add_issue(self, node, issue_type, reason):
         # pycparser's node.coord contains the line number and other location data.
-        line = node.coord.line if node.coord else "未知"
+        line = node.coord.line if node.coord else "unknown"
         self.issues.append((line, issue_type, reason))
 
     def visit_Union(self, node):
         """Detect union definitions."""
-        self.add_issue(node, "联合体 (Union) 定义", 
-                       "联合体成员在内存中重叠，反编译器很难在静态分析时确定当前使用的是哪个类型的字段，通常会降级推断。")
+        self.add_issue(
+            node,
+            "Union definition",
+            "Union members overlap in memory, making it difficult for a decompiler "
+            "to determine which field type is active during static analysis. This "
+            "usually degrades type inference.",
+        )
         self.generic_visit(node)
 
     def visit_Struct(self, node):
@@ -31,8 +36,13 @@ class DecompilerTrapVisitor(c_ast.NodeVisitor):
         if node.decls:
             for decl in node.decls:
                 if decl.bitsize: # A bit width is specified, for example: int flag : 3;
-                    self.add_issue(decl, "位域 (Bit-field)", 
-                                   "位域高度依赖编译器的具体实现（对齐、大小端），反编译器极易将其错误推断为复杂的位掩码运算而非结构体字段。")
+                    self.add_issue(
+                        decl,
+                        "Bit-field",
+                        "Bit-fields depend heavily on compiler-specific layout, "
+                        "alignment, and endianness. A decompiler may infer complex "
+                        "bit-mask operations instead of structure fields.",
+                    )
         self.generic_visit(node)
 
     def visit_Cast(self, node):
@@ -46,16 +56,26 @@ class DecompilerTrapVisitor(c_ast.NodeVisitor):
                 
                 # Pay special attention to casts to char* or void* for byte-level operations.
                 if target_type in ('char', 'void'):
-                    self.add_issue(node, f"强转为 {target_type}*", 
-                                   "将结构体或变量指针强转为字节指针通常意味着后续有越过类型边界的硬算术运算，这会抹除反编译器眼中的类型结构。")
+                    self.add_issue(
+                        node,
+                        f"Cast to {target_type}*",
+                        "Casting a structure or variable pointer to a byte pointer "
+                        "often precedes arithmetic across type boundaries, which "
+                        "erases type structure from the decompiler's view.",
+                    )
         self.generic_visit(node)
 
     def visit_ArrayRef(self, node):
         """Detect suspicious array access with a basic bounds check."""
         # Look for constant negative subscripts or operations that may go out of bounds.
         if isinstance(node.subscript, c_ast.UnaryOp) and node.subscript.op == '-':
-            self.add_issue(node, "负数数组下标", 
-                           "使用负数下标访问数组通常是内存越界的 Hack 技巧（如访问前面的结构体头部），这会导致反编译器的类型传播链断裂。")
+            self.add_issue(
+                node,
+                "Negative array subscript",
+                "A negative array subscript often indicates an out-of-bounds memory "
+                "access technique, such as reaching a preceding structure header. "
+                "This can break the decompiler's type-propagation chain.",
+            )
         self.generic_visit(node)
 
 class ASTBasedDetector:
@@ -133,7 +153,14 @@ class ASTBasedDetector:
             return adjusted_issues
         except Exception as e:
             # Record the parse failure, then skip the file and continue scanning.
-            return [("解析失败", "AST 构建失败", f"代码存在语法错误或缺少自定义类型(typedef)。错误详情: {str(e)}")]
+            return [
+                (
+                    "parse failed",
+                    "AST construction failed",
+                    "The code contains a syntax error or lacks a custom typedef. "
+                    f"Details: {str(e)}",
+                )
+            ]
 
 def scan_directory(directory_path):
     detector = ASTBasedDetector()
@@ -164,38 +191,48 @@ def scan_directory(directory_path):
 
 def print_report(all_issues):
     print("=" * 70)
-    print("基于 AST (抽象语法树) 的反编译类型推断缺陷分析报告")
+    print("AST-Based Decompiler Type-Inference Risk Report")
     print("=" * 70)
     
     if not all_issues:
-        print("  ✓ 未发现明显的反编译陷阱。")
+        print("  ✓ No obvious decompilation traps were found.")
         return
 
     total_files = len(all_issues)
     total_issues = sum(len(issues) for issues in all_issues.values())
-    print(f"扫描完毕！在 {total_files} 个文件中发现了 {total_issues} 处潜在问题。\n")
+    print(
+        f"Scan complete: found {total_issues} potential issue(s) "
+        f"in {total_files} file(s).\n"
+    )
 
     for filepath, issues in all_issues.items():
-        print(f"📁 目标文件: {filepath}")
+        print(f"📁 Target file: {filepath}")
         for issue in issues:
             line, issue_type, reason = issue
-            if issue_type == "AST 构建失败":
-                print(f"  [!] 解析警告: {reason}")
+            if issue_type == "AST construction failed":
+                print(f"  [!] Parse warning: {reason}")
             else:
-                print(f"  [第 {line} 行] ⚠️ 结构化特征: {issue_type}")
-                print(f"    -> 影响原理: {reason}\n")
+                print(f"  [Line {line}] ⚠️ Structural feature: {issue_type}")
+                print(f"    -> Impact: {reason}\n")
         print("-" * 60)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="批量分析 C 源码文件夹中的反编译陷阱")
-    parser.add_argument("directory", nargs="?", default="/home/lhw/codetran/ghidra/dec-bring/O2", help="要分析的 C 代码文件夹路径 (默认为当前目录)")
+    parser = argparse.ArgumentParser(
+        description="Scan a directory of C source files for decompilation traps"
+    )
+    parser.add_argument(
+        "directory",
+        nargs="?",
+        default="/home/lhw/codetran/ghidra/dec-bring/O2",
+        help="Directory containing C source files",
+    )
     args = parser.parse_args()
 
     target_dir = args.directory
     
     if not os.path.isdir(target_dir):
-        print(f"错误: 找不到文件夹 '{target_dir}'")
+        print(f"Error: directory not found: '{target_dir}'")
     else:
-        print(f"正在扫描文件夹: {target_dir} ...")
+        print(f"Scanning directory: {target_dir} ...")
         report_data = scan_directory(target_dir)
         print_report(report_data)

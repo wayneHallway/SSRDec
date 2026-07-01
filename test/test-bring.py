@@ -107,8 +107,9 @@ def check_free_space_or_raise(path, min_gb=MIN_FREE_SPACE_GB):
     free = disk_free_gb(path)
     if free < min_gb:
         raise RuntimeError(
-            f"磁盘剩余空间不足：{path} 所在文件系统仅剩 {free:.2f} GB，"
-            f"低于阈值 {min_gb:.2f} GB。已主动停止，避免写满磁盘。"
+            f"Insufficient disk space: the filesystem containing {path} has "
+            f"{free:.2f} GB free, below the {min_gb:.2f} GB threshold. "
+            "Stopping to avoid filling the disk."
         )
 
 
@@ -122,7 +123,7 @@ def compact_text(text, max_chars):
     omitted = len(text) - max_chars
     return (
         text[:half]
-        + f"\n\n...[日志过大，中间截断 {omitted} 个字符]...\n\n"
+        + f"\n\n...[log too large; omitted {omitted} characters from the middle]...\n\n"
         + text[-half:]
     )
 
@@ -159,7 +160,9 @@ def run_cmd(cmd, cwd, timeout=None):
             kill_process_group(pgid)
             out, _ = proc.communicate()
             return False, compact_text(
-                (out or "") + f"\n[Timeout] 执行超时 ({timeout}s)，已杀掉整个进程组 pgid={pgid}。\n",
+                (out or "")
+                + f"\n[Timeout] Execution timed out after {timeout}s; "
+                f"terminated process group pgid={pgid}.\n",
                 MAX_LOG_CHARS,
             )
 
@@ -198,7 +201,7 @@ def safe_rmtree(path):
     try:
         shutil.rmtree(path)
     except Exception as e:
-        print(f"⚠️ 删除目录失败: {path}, 原因: {e}")
+        print(f"⚠️ Failed to remove directory {path}: {e}")
 
 
 def cleanup_current_tmp_root():
@@ -210,7 +213,7 @@ def cleanup_current_tmp_root():
 
 
 def handle_exit_signal(signum, frame):
-    print(f"\n⚠️ 收到信号 {signum}，正在清理子进程和临时目录...")
+    print(f"\n⚠️ Received signal {signum}; cleaning child processes and temporary files...")
     cleanup_current_tmp_root()
     sys.exit(128 + signum)
 
@@ -275,15 +278,15 @@ def cleanup_stale_deleted_file_processes():
         for pid in sorted(pids):
             try:
                 os.kill(pid, signal.SIGKILL)
-                print(f"🧹 已清理残留 deleted 文件占用进程 PID={pid}")
+                print(f"🧹 Terminated stale process holding deleted files: PID={pid}")
             except ProcessLookupError:
                 pass
             except PermissionError:
-                print(f"⚠️ 无权限清理残留进程 PID={pid}")
+                print(f"⚠️ Permission denied while terminating stale process PID={pid}")
     except FileNotFoundError:
-        print("⚠️ 未安装 lsof，跳过 deleted 文件占用进程清理。")
+        print("⚠️ lsof is not installed; skipping cleanup of deleted-file holders.")
     except Exception as e:
-        print(f"⚠️ 清理 deleted 文件占用进程失败: {e}")
+        print(f"⚠️ Failed to clean up processes holding deleted files: {e}")
 
 
 def collect_benchmarks(source_dir):
@@ -599,23 +602,23 @@ def main():
     tmp_root, suite_dir = prepare_suite_dir(run_id)
     _TMP_ROOT = tmp_root
 
-    print(f"🎯 开始处理，共 {len(benchmarks)} 个项目")
+    print(f"🎯 Starting {len(benchmarks)} benchmark(s)")
     print(f"📁 SOURCE_DIR: {SOURCE_DIR}")
-    print(f"📁 原始 BENCH_DIR: {BENCH_DIR}")
-    print(f"📁 实际构建 suite: {suite_dir}")
-    print(f"📁 输出目录: {out_dir}")
+    print(f"📁 Original BENCH_DIR: {BENCH_DIR}")
+    print(f"📁 Active build suite: {suite_dir}")
+    print(f"📁 Output directory: {out_dir}")
     print(f"🎯 TARGET: {TARGET_ARCH}")
     print(f"🔧 CC: {COMPILER}")
     print(f"🔧 EXTRA_CFLAGS: {OPT_LEVEL}")
-    print(f"🧯 日志最大保存: {MAX_LOG_CHARS} chars/file")
-    print(f"🧹 输出目录保留最近: {KEEP_LAST_OUTPUT_RUNS} 次")
-    print(f"🧹 临时 suite 保留最近: {KEEP_LAST_TEMP_RUNS} 个旧目录")
-    print(f"💾 最小剩余空间阈值: {MIN_FREE_SPACE_GB:.1f} GB")
+    print(f"🧯 Maximum stored log size: {MAX_LOG_CHARS} chars/file")
+    print(f"🧹 Output runs retained: {KEEP_LAST_OUTPUT_RUNS}")
+    print(f"🧹 Old temporary suites retained: {KEEP_LAST_TEMP_RUNS}")
+    print(f"💾 Minimum free-space threshold: {MIN_FREE_SPACE_GB:.1f} GB")
 
     if USE_TEMP_SUITE_DIR:
-        print("🧪 当前模式：复制整个 bringup-bench 到临时目录，不污染原工程")
+        print("🧪 Mode: copy bringup-bench to a temporary directory")
     else:
-        print("⚠️ 当前模式：直接在原始 bringup-bench 中构建，会覆盖源码")
+        print("⚠️ Mode: build in the original bringup-bench tree and overwrite sources")
     print()
 
     total_benchmarks = len(benchmarks)
@@ -643,7 +646,7 @@ def main():
             source_c_path, source_kind = choose_source_file(bench, file_map)
 
             if not source_c_path:
-                print(f"⚠️ 跳过 {bench}: SOURCE_DIR 中没有找到 .c 或 _fixed.c")
+                print(f"⚠️ Skipping {bench}: no .c or _fixed.c file found in SOURCE_DIR")
                 skipped_count += 1
                 benchmark_results.append({
                     "benchmark": bench,
@@ -661,19 +664,22 @@ def main():
                 error_summary[bench] = {
                     "stage": "source",
                     "error_type": "Missing Source",
-                    "full_log": "SOURCE_DIR 中没有找到 .c 或 _fixed.c",
+                    "full_log": "No .c or _fixed.c file was found in SOURCE_DIR",
                 }
                 continue
 
             if source_kind == "primary":
-                print(f"📖 [{bench}] 读取普通源文件: {source_c_path}")
+                print(f"📖 [{bench}] Reading primary source: {source_c_path}")
             else:
-                print(f"📖 [{bench}] 未找到普通 .c，回退读取: {source_c_path}")
+                print(f"📖 [{bench}] Primary .c file not found; using fallback: {source_c_path}")
 
             bench_build_dir = os.path.join(suite_dir, bench)
 
             if not os.path.isdir(bench_build_dir):
-                print(f"⚠️ 跳过 {bench}: suite 中没有对应 benchmark 目录: {bench_build_dir}")
+                print(
+                    f"⚠️ Skipping {bench}: matching benchmark directory not found "
+                    f"in the suite: {bench_build_dir}"
+                )
                 skipped_count += 1
                 benchmark_results.append({
                     "benchmark": bench,
@@ -693,7 +699,10 @@ def main():
                     "error_type": "Missing Benchmark Directory",
                     "source_file": source_c_path,
                     "build_dir": bench_build_dir,
-                    "full_log": f"suite 中没有对应 benchmark 目录: {bench_build_dir}",
+                    "full_log": (
+                        f"Matching benchmark directory not found in suite: "
+                        f"{bench_build_dir}"
+                    ),
                 }
                 continue
 
@@ -702,7 +711,7 @@ def main():
             try:
                 shutil.copy2(source_c_path, target_c_path)
             except Exception as e:
-                print(f"❌ {bench}: 覆盖源码失败: {e}")
+                print(f"❌ {bench}: failed to overwrite source: {e}")
                 skipped_count += 1
                 benchmark_results.append({
                     "benchmark": bench,
@@ -819,10 +828,10 @@ def main():
                 })
                 benchmark_results.append(bench_result)
                 print(
-                    f"{bench:<24} | 编译: ❌ FAIL ({build_time:6.2f}s) "
-                    f"| 执行: ⏸️ SKIP"
+                    f"{bench:<24} | Build: ❌ FAIL ({build_time:6.2f}s) "
+                    f"| Run: ⏸️ SKIP"
                 )
-                print_log_tail("  [!] 编译报错摘要 最后50行:", build_log, n=50)
+                print_log_tail("  [!] Compilation error summary, final 50 lines:", build_log, n=50)
                 print("-" * 75)
 
                 error_summary[bench] = {
@@ -869,8 +878,8 @@ def main():
                     "stage": "test",
                 })
                 print(
-                    f"{bench:<24} | 编译: ✅ PASS ({build_time:6.2f}s) "
-                    f"| 执行: ✅ PASS ({test_time:6.2f}s)"
+                    f"{bench:<24} | Build: ✅ PASS ({build_time:6.2f}s) "
+                    f"| Run: ✅ PASS ({test_time:6.2f}s)"
                 )
                 if elf_path:
                     print(f"  [host] {elf_path}")
@@ -882,10 +891,10 @@ def main():
                     "error": "Execution/Test Error",
                 })
                 print(
-                    f"{bench:<24} | 编译: ✅ PASS ({build_time:6.2f}s) "
-                    f"| 执行: ❌ FAIL ({test_time:6.2f}s)"
+                    f"{bench:<24} | Build: ✅ PASS ({build_time:6.2f}s) "
+                    f"| Run: ❌ FAIL ({test_time:6.2f}s)"
                 )
-                print_log_tail("  [!] 执行报错摘要 最后50行:", test_log, n=50)
+                print_log_tail("  [!] Execution error summary, final 50 lines:", test_log, n=50)
                 print("-" * 75)
 
                 error_summary[bench] = {

@@ -14,13 +14,13 @@ base_output_dir = os.path.abspath("compiled-o-files")
 
 def compile_json_to_o_files():
     if not os.path.exists(JSON_FILE):
-        print(f"❌ 错误: 找不到文件 {JSON_FILE}")
+        print(f"❌ Error: file not found: {JSON_FILE}")
         return
 
     with open(JSON_FILE, 'r', encoding='utf-8') as f:
         data = json.load(f)
 
-    print(f"📥 成功加载 {len(data)} 个任务，准备进行批量编译 (C -> .o)...\n")
+    print(f"📥 Loaded {len(data)} tasks; starting batch compilation (C -> .o)...\n")
 
     for idx, item in enumerate(data):
         task_id = item.get("task_id", idx)
@@ -40,10 +40,10 @@ def compile_json_to_o_files():
         
         # Skip the task if its .o file already exists.
         if os.path.exists(output_o_filepath):
-            print(f"[{base_name}] ⏭️ .o 文件已经存在，跳过...")
+            print(f"[{base_name}] ⏭️ The .o file already exists; skipping...")
             continue
 
-        print(f"[{base_name}] 正在编译 (优化级别: {opt_type})...")
+        print(f"[{base_name}] Compiling (optimization level: {opt_type})...")
 
         # Extract the original code from JSON and save it as a .c file for inspection.
         with open(output_c_filepath, "w", encoding='utf-8') as f_out:
@@ -56,14 +56,14 @@ def compile_json_to_o_files():
         try:
             comp_res = subprocess.run(compile_cmd, capture_output=True, text=True, timeout=10)
             if comp_res.returncode != 0:
-                print(f"[{base_name}] ❌ 编译失败: {comp_res.stderr.strip()}")
+                print(f"[{base_name}] ❌ Compilation failed: {comp_res.stderr.strip()}")
             else:
-                print(f"  -> [成功] 生成: {output_o_filepath}")
+                print(f"  -> [success] Generated: {output_o_filepath}")
         except Exception as e:
-            print(f"[{base_name}] ❌ 编译异常: {e}")
+            print(f"[{base_name}] ❌ Compilation exception: {e}")
 
     print("\n" + "="*50)
-    print("✅ 所有 C 代码已成功编译为 .o 文件！")
+    print("✅ Finished compiling C code into .o files!")
 
 if __name__ == "__main__":
     compile_json_to_o_files()

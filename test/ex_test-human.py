@@ -143,13 +143,13 @@ def load_json_items(json_path: Optional[str] = None) -> List[Dict[str, Any]]:
         return _JSON_ITEMS_CACHE
 
     if not path or not os.path.isfile(path):
-        raise FileNotFoundError(f"找不到 JSON 测试文件: {path}")
+        raise FileNotFoundError(f"JSON test file not found: {path}")
 
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
     if not isinstance(data, list):
-        raise ValueError("JSON 顶层必须是 list，每个元素对应一个任务。")
+        raise ValueError("The top-level JSON value must be a list with one item per task.")
 
     # Ensure dict items.
     items = [x for x in data if isinstance(x, dict)]
@@ -458,7 +458,7 @@ def run_comprehensive_evaluation(code_str: str, task_id: Any, variant_name: str 
 def collect_c_files(c_dir: str) -> List[Path]:
     p = Path(c_dir)
     if not p.is_dir():
-        raise FileNotFoundError(f"找不到 C 文件目录: {c_dir}")
+        raise FileNotFoundError(f"C source directory not found: {c_dir}")
     return sorted([x for x in p.iterdir() if x.is_file() and x.suffix == ".c"])
 
 
@@ -531,7 +531,7 @@ def main() -> None:
 
     if args.mode == "c_dir":
         if not args.c_dir:
-            raise SystemExit("--mode c_dir 需要提供 --c-dir")
+            raise SystemExit("--mode c_dir requires --c-dir")
         run_c_dir(args.c_dir, args.output_json or None)
     else:
         raise SystemExit("single mode is reserved for import usage; use c_dir for standalone testing.")

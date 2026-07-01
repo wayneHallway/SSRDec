@@ -16,17 +16,17 @@ base_output_dir = os.path.abspath("compiled-elf-files")
 
 def compile_json_to_elf_files():
     if not os.path.exists(JSON_FILE):
-        print(f"❌ 错误: 找不到文件 {JSON_FILE}")
+        print(f"❌ Error: file not found: {JSON_FILE}")
         return
 
     try:
         with open(JSON_FILE, 'r', encoding='utf-8') as f:
             data = json.load(f)
     except Exception as e:
-        print(f"❌ 错误: 读取或解析 JSON 文件失败: {e}")
+        print(f"❌ Error: failed to read or parse the JSON file: {e}")
         return
 
-    print(f"📥 成功加载 {len(data)} 个任务，准备进行批量编译 (C -> .elf)...\n")
+    print(f"📥 Loaded {len(data)} tasks; starting batch compilation (C -> .elf)...\n")
 
     success_count = 0
     fail_count = 0
@@ -38,7 +38,7 @@ def compile_json_to_elf_files():
         c_func = item.get("c_func", "")
 
         if not c_func:
-            print(f"[task_{task_id}] ⚠️ 警告: c_func 为空，跳过...")
+            print(f"[task_{task_id}] ⚠️ Warning: c_func is empty; skipping...")
             skip_count += 1
             continue
 
@@ -52,11 +52,11 @@ def compile_json_to_elf_files():
         
         # Skip the task if its .elf file already exists.
         if os.path.exists(output_elf_filepath):
-            print(f"[{base_name}] ⏭️ .elf 文件已经存在，跳过...")
+            print(f"[{base_name}] ⏭️ The .elf file already exists; skipping...")
             skip_count += 1
             continue
 
-        print(f"[{base_name}] 正在编译 (优化级别: {opt_type})...")
+        print(f"[{base_name}] Compiling (optimization level: {opt_type})...")
 
         # ---------------------------------------------------------
         # Use a regular expression to match the main function precisely.
@@ -86,7 +86,7 @@ def compile_json_to_elf_files():
             with open(output_c_filepath, "w", encoding='utf-8') as f_out:
                 f_out.write(c_func)
         except Exception as e:
-            print(f"[{base_name}] ❌ 写入 .c 文件失败: {e}")
+            print(f"[{base_name}] ❌ Failed to write the .c file: {e}")
             fail_count += 1
             continue
 
@@ -100,25 +100,25 @@ def compile_json_to_elf_files():
         try:
             comp_res = subprocess.run(compile_cmd, capture_output=True, text=True, timeout=10)
             if comp_res.returncode != 0:
-                print(f"[{base_name}] ❌ 编译失败: {comp_res.stderr.strip()}")
+                print(f"[{base_name}] ❌ Compilation failed: {comp_res.stderr.strip()}")
                 fail_count += 1
             else:
-                print(f"  -> [成功] 生成: {output_elf_filepath}")
+                print(f"  -> [success] Generated: {output_elf_filepath}")
                 success_count += 1
         except subprocess.TimeoutExpired:
-            print(f"[{base_name}] ❌ 编译超时 (>10s)")
+            print(f"[{base_name}] ❌ Compilation timed out (>10s)")
             fail_count += 1
         except Exception as e:
-            print(f"[{base_name}] ❌ 编译异常: {e}")
+            print(f"[{base_name}] ❌ Compilation exception: {e}")
             fail_count += 1
 
     print("\n" + "="*50)
-    print("✅ 批量编译任务结束！")
-    print(f"总计处理: {len(data)} 个任务")
-    print(f"成功: {success_count}")
-    print(f"失败: {fail_count}")
-    print(f"跳过: {skip_count}")
-    print(f"输出目录: {base_output_dir}")
+    print("✅ Batch compilation complete!")
+    print(f"Tasks processed: {len(data)}")
+    print(f"Succeeded: {success_count}")
+    print(f"Failed: {fail_count}")
+    print(f"Skipped: {skip_count}")
+    print(f"Output directory: {base_output_dir}")
     print("="*50)
 
 if __name__ == "__main__":

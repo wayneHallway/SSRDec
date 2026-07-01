@@ -228,13 +228,13 @@ def extract_task_id_from_filename(path: Path):
 
 def load_json_items(json_path: Path):
     if not json_path.exists():
-        raise FileNotFoundError(f"找不到 JSON 文件: {json_path}")
+        raise FileNotFoundError(f"JSON file not found: {json_path}")
 
     with open(json_path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
     if not isinstance(data, list):
-        raise ValueError("JSON 顶层结构必须是 list，每个元素对应一个任务。")
+        raise ValueError("The top-level JSON value must be a list with one item per task.")
 
     return data
 
@@ -314,7 +314,7 @@ def collect_tasks_from_c_dir(c_dir: Path, json_items, target_type, use_json_test
     An optimization level in the file name takes precedence over the JSON value.
     """
     if not c_dir.exists():
-        raise FileNotFoundError(f"找不到 C 文件目录: {c_dir}")
+        raise FileNotFoundError(f"C source directory not found: {c_dir}")
 
     c_files = sorted(
         c_dir.glob("task_*_fixed.c"),
@@ -324,7 +324,7 @@ def collect_tasks_from_c_dir(c_dir: Path, json_items, target_type, use_json_test
     )
 
     if not c_files:
-        raise FileNotFoundError(f"目录中没有找到 task_*_fixed.c 文件: {c_dir}")
+        raise FileNotFoundError(f"No task_*_fixed.c files found in directory: {c_dir}")
 
     test_map = {}
     if use_json_test:
@@ -335,7 +335,10 @@ def collect_tasks_from_c_dir(c_dir: Path, json_items, target_type, use_json_test
     for file_path in c_files:
         task_id = extract_task_id_from_filename(file_path)
         if task_id is None:
-            print(f"⚠️ 跳过 {file_path.name}: 文件名不符合 task_x_fixed.c 或 task_x_O0_fixed.c 格式。")
+            print(
+                f"⚠️ Skipping {file_path.name}: the filename does not match "
+                "task_x_fixed.c or task_x_O0_fixed.c."
+            )
             continue
 
         file_opt_type = extract_opt_type_from_filename(file_path)
@@ -344,8 +347,8 @@ def collect_tasks_from_c_dir(c_dir: Path, json_items, target_type, use_json_test
         if target_type is not None and file_opt_type is not None:
             if file_opt_type != target_type:
                 print(
-                    f"⚠️ 跳过 {file_path.name}: 文件优化等级是 {file_opt_type}, "
-                    f"当前 target_type={target_type}。"
+                    f"⚠️ Skipping {file_path.name}: file optimization level is "
+                    f"{file_opt_type}, but target_type={target_type}."
                 )
                 continue
 
@@ -358,8 +361,8 @@ def collect_tasks_from_c_dir(c_dir: Path, json_items, target_type, use_json_test
         if target_type is not None and use_json_test:
             if task_id not in test_map:
                 print(
-                    f"⚠️ 跳过 {file_path.name}: JSON 中没有找到 "
-                    f"task_id={task_id}, type={target_type} 的测试。"
+                    f"⚠️ Skipping {file_path.name}: no JSON test found for "
+                    f"task_id={task_id}, type={target_type}."
                 )
                 continue
 
@@ -422,8 +425,8 @@ def run_one_task_legacy(
 
     safe_write_text(src_path, full_c_code)
 
-    print(f"========== 测试任务 (Task ID: {task_id}, Type: {opt_type}) ==========")
-    print(f"  📄 来源: {task['source_name']}")
+    print(f"========== Test Task (Task ID: {task_id}, Type: {opt_type}) ==========")
+    print(f"  📄 Source: {task['source_name']}")
 
     # 1. Compilation stage.
     compile_cmd = [cc, str(src_path), "-o", str(exe_path), "-lm", "-w"]
@@ -437,7 +440,7 @@ def run_one_task_legacy(
         )
 
         if comp_res.returncode != 0:
-            print("  ❌ 编译失败")
+            print("  ❌ Compilation failed")
             if comp_res.stderr.strip():
                 print(f"      {comp_res.stderr.strip()[:4000]}")
 
@@ -448,7 +451,7 @@ def run_one_task_legacy(
                     "task_id": task_id,
                     "type": opt_type,
                     "stage": "Compile",
-                    "error": "编译失败",
+                    "error": "Compilation failed",
                     "details": comp_res.stderr.strip(),
                     "source": task["source_name"],
                     "temp_source": str(src_path) if keep_temp else "",
@@ -456,7 +459,7 @@ def run_one_task_legacy(
             }
 
     except subprocess.TimeoutExpired:
-        print("  ❌ 编译超时")
+        print("  ❌ Compilation timed out")
         return {
             "passed": False,
             "compiled": False,
@@ -464,7 +467,7 @@ def run_one_task_legacy(
                 "task_id": task_id,
                 "type": opt_type,
                 "stage": "Compile",
-                "error": "编译超时",
+                "error": "Compilation timed out",
                 "details": "",
                 "source": task["source_name"],
                 "temp_source": str(src_path) if keep_temp else "",
@@ -472,7 +475,7 @@ def run_one_task_legacy(
         }
 
     except Exception as e:
-        print(f"  ❌ 编译异常: {e}")
+        print(f"  ❌ Compilation exception: {e}")
         return {
             "passed": False,
             "compiled": False,
@@ -480,7 +483,7 @@ def run_one_task_legacy(
                 "task_id": task_id,
                 "type": opt_type,
                 "stage": "Compile",
-                "error": "编译异常",
+                "error": "Compilation exception",
                 "details": str(e),
                 "source": task["source_name"],
                 "temp_source": str(src_path) if keep_temp else "",
@@ -500,34 +503,34 @@ def run_one_task_legacy(
 
         for line in run_res.stdout.splitlines():
             if "[PASS]" in line:
-                print(f"    ✅ 用例通过: {line.split('[PASS]')[-1].strip()}")
+                print(f"    ✅ Test case passed: {line.split('[PASS]')[-1].strip()}")
 
         if run_res.returncode == 0:
-            print("  🎉 测试通过\n")
+            print("  🎉 Tests passed\n")
             return {
                 "passed": True,
                 "compiled": True,
                 "failure": None
             }
 
-        print(f"  ❌ 运行失败 (Exit Code: {run_res.returncode})")
+        print(f"  ❌ Execution failed (exit code: {run_res.returncode})")
 
         fail_found = False
         for line in run_res.stderr.splitlines():
             if "[FAIL]" in line:
-                print(f"    ❌ 用例失败: {line.split('[FAIL]')[-1].strip()}")
+                print(f"    ❌ Test case failed: {line.split('[FAIL]')[-1].strip()}")
                 fail_found = True
 
         if not fail_found:
             if run_res.stderr.strip():
                 error_msg = run_res.stderr.strip().splitlines()[0]
-                print(f"    ⚠️ 原生报错: {error_msg}")
-                error_reason = f"原生报错: {error_msg}"
+                print(f"    ⚠️ Native error: {error_msg}")
+                error_reason = f"Native error: {error_msg}"
             else:
-                error_reason = f"程序异常退出，exit code={run_res.returncode}"
+                error_reason = f"Program terminated abnormally with exit code {run_res.returncode}"
                 print(f"    ⚠️ {error_reason}")
         else:
-            error_reason = "断言失败"
+            error_reason = "Assertion failed"
 
         print()
 
@@ -547,7 +550,7 @@ def run_one_task_legacy(
         }
 
     except subprocess.TimeoutExpired:
-        print("  ❌ 运行超时，可能死循环\n")
+        print("  ❌ Execution timed out; possible infinite loop\n")
         return {
             "passed": False,
             "compiled": True,
@@ -555,7 +558,7 @@ def run_one_task_legacy(
                 "task_id": task_id,
                 "type": opt_type,
                 "stage": "Run",
-                "error": "运行超时，可能死循环",
+                "error": "Execution timed out; possible infinite loop",
                 "details": "",
                 "source": task["source_name"],
                 "temp_source": str(src_path) if keep_temp else "",
@@ -563,7 +566,7 @@ def run_one_task_legacy(
         }
 
     except Exception as e:
-        print(f"  ❌ 运行异常: {e}\n")
+        print(f"  ❌ Execution exception: {e}\n")
         return {
             "passed": False,
             "compiled": True,
@@ -571,7 +574,7 @@ def run_one_task_legacy(
                 "task_id": task_id,
                 "type": opt_type,
                 "stage": "Run",
-                "error": "运行异常",
+                "error": "Execution exception",
                 "details": str(e),
                 "source": task["source_name"],
                 "temp_source": str(src_path) if keep_temp else "",
@@ -907,12 +910,12 @@ def execute_tasks(args):
         use_json_test = args.use_json_test
 
     else:
-        raise ValueError(f"未知 mode: {args.mode}")
+        raise ValueError(f"Unknown mode: {args.mode}")
 
     total_tasks = len(tasks)
 
     if total_tasks == 0:
-        print(f"⚠️ 没有找到可测试任务。mode={args.mode}, target_type={target_type}")
+        print(f"⚠️ No testable tasks found. mode={args.mode}, target_type={target_type}")
         return
 
     run_id = now_run_id()
@@ -926,11 +929,11 @@ def execute_tasks(args):
     cc = args.cc
     runner_cmd = shlex.split(args.runner_cmd) if args.runner_cmd.strip() else []
 
-    print(f"📥 成功加载 {total_tasks} 个测试任务")
+    print(f"📥 Loaded {total_tasks} test task(s)")
     print(f"  mode        : {args.mode}")
-    print(f"  target_type : {target_type or '全部'}")
+    print(f"  target_type : {target_type or 'all'}")
     print(f"  cc          : {cc}")
-    print(f"  runner_cmd  : {runner_cmd or '直接运行'}")
+    print(f"  runner_cmd  : {runner_cmd or 'direct execution'}")
     print(f"  json_test   : {use_json_test}")
     print()
 
@@ -945,7 +948,7 @@ def execute_tasks(args):
     if args.keep_temp:
         temp_root = Path(tempfile.mkdtemp(prefix="c_eval_keep_"))
         temp_context = None
-        print(f"🧪 keep-temp 已启用，临时目录保留在: {temp_root}")
+        print(f"🧪 keep-temp enabled; temporary directory retained at: {temp_root}")
     else:
         temp_context = tempfile.TemporaryDirectory(prefix="c_eval_")
         temp_root = Path(temp_context.name)
@@ -1049,87 +1052,87 @@ def execute_tasks(args):
             with open(failed_output_file, "w", encoding="utf-8") as f:
                 json.dump(failed_tasks_details, f, ensure_ascii=False, indent=4)
         except Exception as e:
-            print(f"⚠️ 保存失败任务日志文件时出错: {e}")
+            print(f"⚠️ Failed to save the failed-task log: {e}")
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="支持从 JSON 或 task_x_fixed.c 目录中读取 C 代码并执行测试。"
+        description="Read C code from JSON or a task_x_fixed.c directory and run tests."
     )
 
     parser.add_argument(
         "--mode",
         choices=["json", "c_dir"],
         default="c_dir",
-        help="json: 从 JSON 的 nova_output 读取代码；c_dir: 从 task_x_fixed.c 文件读取代码。"
+        help="json: read code from nova_output; c_dir: read task_x_fixed.c files."
     )
 
     parser.add_argument(
         "--json-file",
         default=DEFAULT_JSON_FILE,
-        help="JSON 文件路径，用于读取 c_test 或原始 nova_output。"
+        help="JSON file containing c_test or the original nova_output."
     )
 
     parser.add_argument(
         "--c-dir",
         default=DEFAULT_C_DIR,
-        help="包含 task_x_fixed.c 的目录。"
+        help="Directory containing task_x_fixed.c files."
     )
 
     parser.add_argument(
         "--target-type",
         default=DEFAULT_TARGET_TYPE,
-        help='过滤优化级别，例如 O0/O1/O2/O3；传 all 表示不过滤。'
+        help="Optimization-level filter such as O0/O1/O2/O3; use all for no filter."
     )
 
     parser.add_argument(
         "--cc",
         default=DEFAULT_CC,
-        help="C 编译器，例如 gcc 或 aarch64-linux-gnu-gcc。"
+        help="C compiler, such as gcc or aarch64-linux-gnu-gcc."
     )
 
     parser.add_argument(
         "--runner-cmd",
         default=DEFAULT_RUNNER_CMD,
-        help='运行器命令，例如 "qemu-aarch64 -L /usr/aarch64-linux-gnu"。本地运行留空。'
+        help='Runner command, such as "qemu-aarch64 -L /usr/aarch64-linux-gnu"; empty for native execution.'
     )
 
     parser.add_argument(
         "--use-json-test",
         action="store_true",
         default=True,
-        help="c_dir 模式下，是否从 JSON 中读取对应 c_test 并拼接测试。默认开启。"
+        help="In c_dir mode, append the matching c_test from JSON. Enabled by default."
     )
 
     parser.add_argument(
         "--no-json-test",
         action="store_false",
         dest="use_json_test",
-        help="c_dir 模式下，不拼接 JSON 测试，直接编译运行 task_x_fixed.c。"
+        help="In c_dir mode, compile and run task_x_fixed.c without appending JSON tests."
     )
 
     parser.add_argument(
         "--strip-main",
         action="store_true",
-        help="尝试删除 fixed.c 中的 main 函数，避免和 JSON 的 c_test 里的 main 冲突。默认关闭。"
+        help="Try to remove main from fixed.c to avoid conflicts with JSON c_test. Disabled by default."
     )
 
     parser.add_argument(
         "--keep-temp",
         action="store_true",
-        help="保留临时编译目录，方便排查失败任务。默认自动清理。"
+        help="Retain the temporary build directory for debugging. Cleaned by default."
     )
 
     parser.add_argument(
         "--failed-output",
         default="",
-        help="失败任务日志输出路径。默认自动生成。"
+        help="Failed-task log path. Generated automatically by default."
     )
 
     parser.add_argument(
         "--output-dir",
         default="",
-        help="指标、日志和任务明细输出目录。默认写入 metric_outputs/test-human/<timestamp>。"
+        help="Metrics, logs, and task-detail output directory. Defaults to metric_outputs/test-human/<timestamp>."
     )
 
     return parser.parse_args()

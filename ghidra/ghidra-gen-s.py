@@ -10,16 +10,19 @@ def extract_cfg_to_db(binary_path, db: 'GraphVectorDB'):
     """
     Extract a binary's CFG with angr and store it directly in GraphVectorDB.
     """
-    print(f"\n[*] 正在加载二进制文件: {binary_path}")
+    print(f"\n[*] Loading binary: {binary_path}")
     # auto_load_libs=False greatly speeds up analysis when only the target program matters.
     proj = angr.Project(binary_path, auto_load_libs=False)
 
-    print("[*] 正在生成控制流图 (CFGFast)...")
+    print("[*] Generating the control-flow graph (CFGFast)...")
     # normalize=True regularizes basic blocks and prevents overlaps.
     cfg = proj.analyses.CFGFast(normalize=True)
 
-    print(f"[*] 成功提取！共发现 {len(cfg.graph.nodes())} 个节点，{len(cfg.graph.edges())} 条边。")
-    print("[*] 正在将数据录入 GraphVectorDB...")
+    print(
+        f"[*] Extraction complete: found {len(cfg.graph.nodes())} node(s) "
+        f"and {len(cfg.graph.edges())} edge(s)."
+    )
+    print("[*] Inserting data into GraphVectorDB...")
 
     # 1. Traverse all nodes (basic blocks) and store them in the database.
     for node in cfg.nodes():
@@ -50,7 +53,7 @@ def extract_cfg_to_db(binary_path, db: 'GraphVectorDB'):
             
         jumpkind = data.get('jumpkind', '')
         edge_type = 'cfg_unknown'
-        desc = f"angr 跳转类型: {jumpkind}"
+        desc = f"angr jump kind: {jumpkind}"
         
         # Map angr jump kinds to the database's edge types.
         if jumpkind == 'Ijk_Boring':
@@ -58,21 +61,21 @@ def extract_cfg_to_db(binary_path, db: 'GraphVectorDB'):
             out_degree = cfg.graph.out_degree(src)
             if out_degree > 1:
                 edge_type = 'cfg_conditional'
-                desc = "条件分支 (If/Else)"
+                desc = "Conditional branch (If/Else)"
             else:
                 edge_type = 'cfg_unconditional'
-                desc = "无条件跳转 / 顺序执行"
+                desc = "Unconditional jump / sequential execution"
         elif jumpkind == 'Ijk_Call':
             edge_type = 'cfg_call'
-            desc = "函数调用 (Call)"
+            desc = "Function call"
         elif jumpkind == 'Ijk_Ret':
             edge_type = 'cfg_return'
-            desc = "函数返回 (Return)"
+            desc = "Function return"
 
         # Store the edge in the database graph.
         db.add_edge(src.addr, dst.addr, edge_type, desc)
         
-    print(f"[+] {os.path.basename(binary_path)} 的图谱数据已成功入库！\n")
+    print(f"[+] Graph data for {os.path.basename(binary_path)} was stored successfully!\n")
 
 # ================= Test pipeline =================
 if __name__ == "__main__":
@@ -93,7 +96,7 @@ if __name__ == "__main__":
         # 4. Test RAG retrieval with an address that was just inserted.
         if db.addresses:
             test_anchor = db.addresses[0]  # Use the address of the first stored basic block.
-            print(f"--- 正在为地址 {hex(test_anchor)} 生成 Graph RAG Context ---")
+            print(f"--- Generating Graph RAG context for address {hex(test_anchor)} ---")
             print(db.retrieve_structural_context(test_anchor))
     else:
-        print(f"请提供一个有效的二进制文件路径以供测试: {sample_binary}")
+        print(f"Provide a valid binary path for testing: {sample_binary}")

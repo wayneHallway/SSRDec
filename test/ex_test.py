@@ -35,7 +35,7 @@ def run_cmd(cmd, cwd, timeout=None):
         )
         return res.returncode == 0, res.stdout
     except subprocess.TimeoutExpired:
-        return False, f"[Timeout] 执行超时 ({timeout}s)!"
+        return False, f"[Timeout] Execution timed out after {timeout}s!"
     except Exception as e:
         return False, str(e)
 
@@ -248,14 +248,14 @@ def run_comprehensive_evaluation(code_str, task_id, variant_name="Root"):
     """
     bench_build_dir = os.path.join(BENCH_DIR, task_id)
     if not os.path.isdir(bench_build_dir):
-        return False, False, f"⚠️ Error: 找不到构建目录 {bench_build_dir}", None
+        return False, False, f"⚠️ Error: build directory not found: {bench_build_dir}", None
 
     target_c_path = os.path.join(bench_build_dir, f"{task_id}.c")
     try:
         with open(target_c_path, "w", encoding="utf-8", errors="ignore") as f:
             f.write(code_str)
     except Exception as e:
-        return False, False, f"⚠️ Error: 无法写入代码到 {target_c_path}: {e}", None
+        return False, False, f"⚠️ Error: cannot write code to {target_c_path}: {e}", None
 
     build_cmd, test_cmd = get_build_and_test_cmds()
     remove_old_host_outputs(bench_build_dir, task_id)
@@ -283,7 +283,7 @@ def run_comprehensive_evaluation(code_str, task_id, variant_name="Root"):
     if not build_ok:
         report_parts.append("[Compilation Failed]")
         report_log = "\n\n".join(report_parts)
-        print(f"      [{variant_name:<15}] 编译: ❌ FAIL | 执行: ⏸️ SKIP")
+        print(f"      [{variant_name:<15}] Build: ❌ FAIL | Run: ⏸️ SKIP")
         return False, False, report_log, elf_path
 
     report_parts.append("[Compilation]: SUCCESS")
@@ -299,12 +299,12 @@ def run_comprehensive_evaluation(code_str, task_id, variant_name="Root"):
     if test_ok:
         report_parts.append("[Dynamic Test Run]: SUCCESS")
         report_log = "\n\n".join(report_parts)
-        print(f"      [{variant_name:<15}] 编译: ✅ PASS | 执行: ✅ PASS")
+        print(f"      [{variant_name:<15}] Build: ✅ PASS | Run: ✅ PASS")
         return True, True, report_log, elf_path
 
     report_parts.append("[Dynamic Test Run Failed]")
     report_log = "\n\n".join(report_parts)
-    print(f"      [{variant_name:<15}] 编译: ✅ PASS | 执行: ❌ FAIL")
+    print(f"      [{variant_name:<15}] Build: ✅ PASS | Run: ❌ FAIL")
     return True, False, report_log, elf_path
 
 
@@ -327,19 +327,19 @@ def main():
     # When run directly with a temporary suite, subsequent tests use that suite as well.
     BENCH_DIR = suite_dir
 
-    print(f"🎯 开始处理，共 {len(benchmarks)} 个项目")
+    print(f"🎯 Starting {len(benchmarks)} benchmark(s)")
     print(f"📁 SOURCE_DIR: {SOURCE_DIR}")
-    print(f"📁 原始 BENCH_DIR: {original_bench_dir}")
-    print(f"📁 实际构建 suite: {BENCH_DIR}")
-    print(f"📁 输出目录: {out_dir}")
+    print(f"📁 Original BENCH_DIR: {original_bench_dir}")
+    print(f"📁 Active build suite: {BENCH_DIR}")
+    print(f"📁 Output directory: {out_dir}")
     print(f"🎯 TARGET: {TARGET_ARCH}")
     print(f"🔧 CC: {COMPILER}")
     print(f"🔧 EXTRA_CFLAGS: {OPT_LEVEL}")
 
     if USE_TEMP_SUITE_DIR:
-        print("🧪 当前模式：复制整个 bringup-bench 到临时目录，不污染原工程")
+        print("🧪 Mode: copy bringup-bench to a temporary directory")
     else:
-        print("⚠️ 当前模式：直接在原始 bringup-bench 中构建，会覆盖源码")
+        print("⚠️ Mode: build in the original bringup-bench tree and overwrite sources")
     print()
 
     total_benchmarks = len(benchmarks)
@@ -354,30 +354,33 @@ def main():
         source_c_path, source_kind = choose_source_file(bench, file_map)
 
         if not source_c_path:
-            print(f"⚠️ 跳过 {bench}: SOURCE_DIR 中没有找到 .c 或 _fixed.c")
+            print(f"⚠️ Skipping {bench}: no .c or _fixed.c file found in SOURCE_DIR")
             skipped_count += 1
             error_summary[bench] = {
                 "stage": "source",
                 "error_type": "Missing Source",
-                "full_log": "SOURCE_DIR 中没有找到 .c 或 _fixed.c",
+                "full_log": "No .c or _fixed.c file was found in SOURCE_DIR",
             }
             continue
 
         if source_kind == "primary":
-            print(f"📖 [{bench}] 读取普通源文件: {source_c_path}")
+            print(f"📖 [{bench}] Reading primary source: {source_c_path}")
         else:
-            print(f"📖 [{bench}] 未找到普通 .c，回退读取: {source_c_path}")
+            print(f"📖 [{bench}] Primary .c file not found; using fallback: {source_c_path}")
 
         bench_build_dir = os.path.join(BENCH_DIR, bench)
         if not os.path.isdir(bench_build_dir):
-            print(f"⚠️ 跳过 {bench}: suite 中没有对应 benchmark 目录: {bench_build_dir}")
+            print(
+                f"⚠️ Skipping {bench}: matching benchmark directory not found "
+                f"in the suite: {bench_build_dir}"
+            )
             skipped_count += 1
             error_summary[bench] = {
                 "stage": "benchmark_dir",
                 "error_type": "Missing Benchmark Directory",
                 "source_file": source_c_path,
                 "build_dir": bench_build_dir,
-                "full_log": f"suite 中没有对应 benchmark 目录: {bench_build_dir}",
+                "full_log": f"Matching benchmark directory not found in suite: {bench_build_dir}",
             }
             continue
 
@@ -385,7 +388,7 @@ def main():
             with open(source_c_path, "r", encoding="utf-8", errors="ignore") as f:
                 code_str = f.read()
         except Exception as e:
-            print(f"❌ {bench}: 读取源码失败: {e}")
+            print(f"❌ {bench}: failed to read source: {e}")
             skipped_count += 1
             error_summary[bench] = {
                 "stage": "read_source",
@@ -425,13 +428,13 @@ def main():
 
         if is_compiled and is_run_success:
             test_success_count += 1
-            print(f"{bench:<24} | 编译: ✅ PASS ({eval_time:6.2f}s) | 执行: ✅ PASS")
+            print(f"{bench:<24} | Build: ✅ PASS ({eval_time:6.2f}s) | Run: ✅ PASS")
             if elf_path:
                 print(f"  [host] {elf_path}")
         elif is_compiled:
             test_fail_count += 1
-            print(f"{bench:<24} | 编译: ✅ PASS ({eval_time:6.2f}s) | 执行: ❌ FAIL")
-            print_log_tail("  [!] 执行报错摘要 最后50行:", report_log, n=50)
+            print(f"{bench:<24} | Build: ✅ PASS ({eval_time:6.2f}s) | Run: ❌ FAIL")
+            print_log_tail("  [!] Execution error summary, final 50 lines:", report_log, n=50)
             print("-" * 75)
             error_summary[bench] = {
                 "stage": "test",
@@ -444,8 +447,8 @@ def main():
                 "full_log": report_log,
             }
         else:
-            print(f"{bench:<24} | 编译: ❌ FAIL ({eval_time:6.2f}s) | 执行: ⏸️ SKIP")
-            print_log_tail("  [!] 编译报错摘要 最后50行:", report_log, n=50)
+            print(f"{bench:<24} | Build: ❌ FAIL ({eval_time:6.2f}s) | Run: ⏸️ SKIP")
+            print_log_tail("  [!] Compilation error summary, final 50 lines:", report_log, n=50)
             print("-" * 75)
             error_summary[bench] = {
                 "stage": "build",
@@ -501,29 +504,36 @@ def main():
         try:
             shutil.rmtree(tmp_root)
         except Exception as e:
-            print(f"⚠️ 删除临时目录失败: {tmp_root}, 原因: {e}")
+            print(f"⚠️ Failed to remove temporary directory {tmp_root}: {e}")
 
     print()
     print("=" * 75)
-    print("📊 汇总结果")
+    print("📊 Summary")
     print("=" * 75)
-    print(f"总 benchmark 数: {total_benchmarks}")
-    print(f"跳过数量: {skipped_count}")
+    print(f"Total benchmarks: {total_benchmarks}")
+    print(f"Skipped: {skipped_count}")
     print()
-    print(f"📊 编译通过率: {build_success_count}/{total_benchmarks} ({build_rate_total * 100:.2f}%)")
-    print(f"🏃 执行通过率: {test_success_count}/{build_success_count} ({test_rate_among_built * 100:.2f}%，以编译通过为分母)")
-    print(f"🏃 执行通过率占总数: {test_success_count}/{total_benchmarks} ({test_rate_total * 100:.2f}%)")
+    print(f"📊 Build pass rate: {build_success_count}/{total_benchmarks} ({build_rate_total * 100:.2f}%)")
+    print(
+        f"🏃 Run pass rate among successful builds: "
+        f"{test_success_count}/{build_success_count} "
+        f"({test_rate_among_built * 100:.2f}%)"
+    )
+    print(
+        f"🏃 Overall run pass rate: {test_success_count}/{total_benchmarks} "
+        f"({test_rate_total * 100:.2f}%)"
+    )
     print()
-    print(f"编译失败数: {build_fail_count}")
-    print(f"编译成功但执行失败数: {test_fail_count}")
-    print(f"错误总数: {len(error_summary)}")
+    print(f"Build failures: {build_fail_count}")
+    print(f"Run failures after successful build: {test_fail_count}")
+    print(f"Total errors: {len(error_summary)}")
     print()
-    print(f"📄 JSON 汇总报告: {json_report_path}")
-    print(f"📁 输出目录: {out_dir}")
+    print(f"📄 JSON summary report: {json_report_path}")
+    print(f"📁 Output directory: {out_dir}")
 
     if USE_TEMP_SUITE_DIR and not CLEAN_TEMP_SUITE_DIR:
         print()
-        print("🧪 临时 Bringup-Bench 目录已保留，方便排查:")
+        print("🧪 Temporary Bringup-Bench directory retained for debugging:")
         print(f"   {tmp_root}")
 
 
